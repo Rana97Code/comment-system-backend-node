@@ -7,8 +7,9 @@ const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const commentRoutes = require('./routes/commentRoutes');
+const contentRoutes = require('./routes/contentRoutes');
 const errorHandler = require('./middleware/errorHandler');
-
+const path = require('path');
 const app = express();
 
 app.use(cors({
@@ -46,9 +47,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(rateLimit({ windowMs: 60 * 1000, max: 120 }));
 
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // routes
 app.use('/auth', authRoutes);
 app.use('/comments', commentRoutes);
+app.use('/contents', contentRoutes);
 
 // health
 app.get('/ping', (req, res) => res.json({ ok: true }));

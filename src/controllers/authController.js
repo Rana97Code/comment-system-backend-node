@@ -20,8 +20,18 @@ async function me(req, res, next) {
   try {
     // req.user set by authMiddleware
     const user = req.user;
-    res.json({ id: user.sub, name: user.name, email: user.email });
+    res.json({ id: user.sub, name: user.name, email: user.email, role: user.role });
   } catch (err) { next(err); }
 }
 
-module.exports = { register, login, me };
+async function getNonAdminUsers(req, res) {
+  try {
+    const users = await authService.getNonAdminUsers();
+    res.status(200).json(users);
+  } catch (err) {
+    console.error("❌ getNonAdminUsers error:", err);
+    res.status(500).json({ message: err.message || "Failed to fetch users" });
+  }
+}
+
+module.exports = { register, login, getNonAdminUsers, me };
