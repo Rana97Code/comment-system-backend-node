@@ -20,7 +20,7 @@ async function me(req, res, next) {
   try {
     // req.user set by authMiddleware
     const user = req.user;
-    res.json({ id: user._id, name: user.name, email: user.email });
+    res.json({ id: user.sub, name: user.name, email: user.email });
   } catch (err) { next(err); }
 }
 
