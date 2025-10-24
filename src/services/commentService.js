@@ -1,135 +1,233 @@
-// const commentDao = require('../dao/commentDao');
-// const Comment = require('../models/Comment');
 
-// /**
-//  * Create comment (top-level or reply)
-//  */
-// async function createComment({ text, authorId, authorName, parentId = null }) {
-//   if (!text || !text.trim()) throw { status: 400, message: 'Empty comment' };
-//   const doc = {
-//     text: text.trim(),
-//     author: authorId,
-//     authorName,
-//     parentId: parentId || null
-//   };
-//   const comment = await commentDao.createComment(doc);
-//   return comment;
-// }
+const populateReplies = require("../utils/populateReplies");
+const Comment = require("../models/Comment");
+const UserDao = require("../dao/userDao");
+const mongoose = require("mongoose");
 
-// /**
-//  * Update comment text (only owner allowed in controller before calling)
-//  */
-// async function editComment(id, userId, newText) {
-//   if (!newText || !newText.trim()) throw { status: 400, message: 'Empty comment' };
-//   const comment = await commentDao.findById(id);
-//   if (!comment) throw { status: 404, message: 'Comment not found' };
-//   if (!comment.author.equals(userId)) throw { status: 403, message: 'Not authorized' };
-//   return commentDao.updateById(id, { text: newText.trim() });
-// }
+// 🔹 Create comment or reply
+async function addComment({ text, userId, authorName, contentId, parentId = null }) {
+  if (!text || !text.trim()) throw { status: 400, message: "Comment cannot be empty" };
+  if (!contentId) throw { status: 400, message: "Content ID is required" };
 
-// /**
-//  * Delete comment (owner only)
-//  * Option: we can also cascade-delete replies or mark as deleted. Here we delete.
-//  */
+  const comment = new Comment({
+    text: text.trim(),
+    userId,
+    authorName,
+    contentId,
+    parentId
+  });
+
+  await comment.save();
+
+  // if it's a reply, link it to parent comment
+  if (parentId) {
+    await Comment.findByIdAndUpdate(parentId, { $push: { replies: comment._id } });
+  }
+
+  return comment;
+}
+
+
+
+
+// 🔹 Edit comment (only owner)
+async function editComment(id, userId, newText) {
+  if (!newText || !newText.trim()) throw { status: 400, message: "Empty comment" };
+  const comment = await Comment.findById(id);
+  if (!comment) throw { status: 404, message: "Comment not found" };
+  if (comment.userId.toString() !== userId.toString()) throw { status: 403, message: "Not authorized" };
+
+  comment.text = newText.trim();
+  comment.updatedAt = new Date();
+  await comment.save();
+  return comment;
+}
+
+// 🔹 Delete comment (only owner)
 // async function deleteComment(id, userId) {
-//   const comment = await commentDao.findById(id);
-//   if (!comment) throw { status: 404, message: 'Comment not found' };
-//   if (!comment.author.equals(userId)) throw { status: 403, message: 'Not authorized' };
-//   return commentDao.deleteById(id);
-// }
+//   const comment = await Comment.findById(id);
+//   if (!comment) throw { status: 404, message: "Comment not found" };
+//   if (comment.userId.toString() !== userId.toString()) throw { status: 403, message: "Not authorized" };
 
-// /**
-//  * Vote: type = 'like'|'dislike'
-//  * A user can like OR dislike once (toggle & move if switching)
-//  */
-// async function vote(id, userId, type) {
-//   const comment = await commentDao.findById(id);
-//   if (!comment) throw { status: 404, message: 'Comment not found' };
-//   const uidStr = userId.toString();
-
-//   const liked = comment.likes.find(u => u.toString() === uidStr);
-//   const disliked = comment.dislikes.find(u => u.toString() === uidStr);
-
-//   if (type === 'like') {
-//     if (liked) {
-//       // already liked -> remove like (toggle off)
-//       comment.likes = comment.likes.filter(u => u.toString() !== uidStr);
-//     } else {
-//       // add like, remove dislike if exists
-//       comment.likes.push(userId);
-//       comment.dislikes = comment.dislikes.filter(u => u.toString() !== uidStr);
-//     }
-//   } else if (type === 'dislike') {
-//     if (disliked) {
-//       comment.dislikes = comment.dislikes.filter(u => u.toString() !== uidStr);
-//     } else {
-//       comment.dislikes.push(userId);
-//       comment.likes = comment.likes.filter(u => u.toString() !== uidStr);
-//     }
-//   } else {
-//     throw { status: 400, message: 'Invalid vote type' };
+//   // if it’s a reply, remove it from parent's replies list
+//   if (comment.parentId) {
+//     await Comment.findByIdAndUpdate(comment.parentId, { $pull: { replies: comment._id } });
 //   }
 
-//   comment.updatedAt = new Date();
-//   await comment.save();
-
-//   // return a shaped comment for the client (with counts and userVote)
-//   const likesCount = comment.likes.length;
-//   const dislikesCount = comment.dislikes.length;
-//   const userVote = comment.likes.find(u => u.toString() === uidStr) ? 'like' : (comment.dislikes.find(u=> u.toString()===uidStr) ? 'dislike' : null);
-
-//   return { _id: comment._id, text: comment.text, author: comment.author, authorName: comment.authorName, likes: likesCount, dislikes: dislikesCount, userVote, createdAt: comment.createdAt, updatedAt: comment.updatedAt, parentId: comment.parentId };
+//   await comment.deleteOne();
+//   return true;
 // }
 
-// /**
-//  * Fetch comments with pagination & sorting
-//  * Optionally nest replies under their parent in the returned structure (simple approach)
-//  */
-// async function listComments({ page = 1, limit = 10, sort = 'newest', userId = null }) {
-//   const res = await commentDao.queryComments({ page, limit, sort });
-//   // map to include userVote for each comment
-//   const comments = res.comments.map(c => {
-//     const userVote = (() => {
-//       if (!userId) return null;
-//       const uIdStr = userId.toString();
-//       const liked = c.likes && c.likes.some(x => x.toString() === uIdStr);
-//       const disliked = c.dislikes && c.dislikes.some(x => x.toString() === uIdStr);
-//       return liked ? 'like' : (disliked ? 'dislike' : null);
-//     })();
-//     return { ...c, likes: c.likesCount ?? (c.likes ? c.likes.length : 0), dislikes: c.dislikesCount ?? (c.dislikes ? c.dislikes.length : 0), userVote };
-//   });
+// 🔹 Delete comment (only owner or authorized user)
+async function deleteComment(id, userId) {
+  const user = await UserDao.findById(userId);
+  if (!user || !user._id) {
+    throw { status: 401, message: "User not authenticated" };
+  }
 
-//   // Optional: build a parent->children map for replies
-//   const byId = {};
-//   comments.forEach(c => { byId[c._id.toString()] = { ...c, replies: [] }; });
-//   const topLevel = [];
-//   comments.forEach(c => {
-//     if (c.parentId) {
-//       const pid = c.parentId.toString();
-//       if (byId[pid]) byId[pid].replies.push(byId[c._id.toString()]);
-//     } else {
-//       topLevel.push(byId[c._id.toString()]);
-//     }
-//   });
+  const comment = await Comment.findById(id);
+  if (!comment) throw { status: 404, message: "Comment not found" };
 
-//   return { comments: topLevel, total: res.total };
-// }
+  const isOwner = comment.userId?.toString?.() === user._id?.toString?.();
+  const isAdmin = user.role === "admin";
+  const isAuthorized = user.isAuthorized === true;
 
-// module.exports = { createComment, editComment, deleteComment, vote, listComments };
+  // ❌ Reject if not owner, not admin, and not authorized
+  if (!isAdmin && !isAuthorized) {
+    throw { status: 403, message: "Not authorized to delete this comment" };
+  }
+
+  // If it's a reply, remove it from parent's replies array
+  if (comment.parentId) {
+    await Comment.findByIdAndUpdate(comment.parentId, { $pull: { replies: comment._id } });
+  }
+
+  await comment.deleteOne();
+
+  return { success: true, message: "Comment deleted successfully" };
+}
 
 
 
 
-const Comment = require('../models/Comment');
+// 🔹 Like / Dislike system
+async function vote(id, userId, type) {
+  const comment = await Comment.findById(id);
+  if (!comment) throw { status: 404, message: "Comment not found" };
 
-const canUserEditOrDelete = (user, comment) => {
-  return comment.userId.toString() === user._id.toString() || user.role === "admin";
+  const uidStr = userId.toString();
+  const alreadyLiked = comment.likes.some(u => u.toString() === uidStr);
+  const alreadyDisliked = comment.dislikes.some(u => u.toString() === uidStr);
+
+  if (type === "like") {
+    if (alreadyLiked) {
+      comment.likes = comment.likes.filter(u => u.toString() !== uidStr);
+    } else {
+      comment.likes.push(userId);
+      comment.dislikes = comment.dislikes.filter(u => u.toString() !== uidStr);
+    }
+  } else if (type === "dislike") {
+    if (alreadyDisliked) {
+      comment.dislikes = comment.dislikes.filter(u => u.toString() !== uidStr);
+    } else {
+      comment.dislikes.push(userId);
+      comment.likes = comment.likes.filter(u => u.toString() !== uidStr);
+    }
+  } else {
+    throw { status: 400, message: "Invalid vote type" };
+  }
+
+  await comment.save();
+
+  const likesCount = comment.likes.length;
+  const dislikesCount = comment.dislikes.length;
+  const userVote = alreadyLiked
+    ? null
+    : alreadyDisliked
+    ? null
+    : type;
+
+  return {
+    _id: comment._id,
+    text: comment.text,
+    authorName: comment.authorName,
+    contentId: comment.contentId,
+    likes: likesCount,
+    dislikes: dislikesCount,
+    userVote,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+    parentId: comment.parentId
+  };
+}
+
+// 🔹 List comments for a specific content with pagination
+
+
+async function listComments({
+  contentId,
+  userId,
+  page = 1,
+  limit = 10,
+  sort = "newest",
+}) {
+  if (!contentId) throw { status: 400, message: "contentId is required" };
+
+  const skip = (page - 1) * limit;
+
+  // ✅ Improved sorting options
+  let sortOption = { createdAt: -1 }; // default newest
+  if (sort === "oldest") sortOption = { createdAt: 1 };
+  else if (sort === "most_liked") sortOption = { likesCount: -1 };
+  else if (sort === "most_disliked") sortOption = { dislikesCount: -1 };
+
+  // ✅ Precompute like/dislike counts in aggregation
+  const baseQuery = [
+    { $match: { contentId: new mongoose.Types.ObjectId(contentId), parentId: null } },
+    {
+      $addFields: {
+        likesCount: { $size: { $ifNull: ["$likes", []] } },
+        dislikesCount: { $size: { $ifNull: ["$dislikes", []] } },
+      },
+    },
+    { $sort: sortOption },
+    { $skip: skip },
+    { $limit: Number(limit) },
+  ];
+
+  const comments = await Comment.aggregate(baseQuery);
+
+  // Convert each aggregated comment back to Mongoose document
+  const hydrated = await Comment.populate(comments, { path: "replies" });
+
+  // Recursively populate all replies
+  for (let c of hydrated) {
+    await populateReplies(c);
+  }
+
+  // ✅ Normalizer (no change)
+  const normalizeComment = (c) => {
+    const uStr = userId ? userId.toString() : "";
+
+    const userVote = userId
+      ? c.likes?.some((x) => x.toString() === uStr)
+        ? "like"
+        : c.dislikes?.some((x) => x.toString() === uStr)
+        ? "dislike"
+        : null
+      : null;
+
+    return {
+      _id: c._id,
+      contentId: c.contentId,
+      userId: c.userId,
+      authorName: c.authorName,
+      text: c.text,
+      parentId: c.parentId,
+      likes: c.likes?.length || 0,
+      dislikes: c.dislikes?.length || 0,
+      userVote,
+      replies: (c.replies || []).map((r) => normalizeComment(r)),
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    };
+  };
+
+  const enriched = hydrated.map((c) =>
+    normalizeComment(c._id ? c : new Comment(c).toObject())
+  );
+
+  const total = await Comment.countDocuments({ contentId, parentId: null });
+
+  return { comments: enriched, total };
+}
+
+
+
+module.exports = {
+  addComment,
+  editComment,
+  deleteComment,
+  vote,
+  listComments
 };
-
-const hasUserLiked = (comment, userId) =>
-  comment.likes.some(u => u.toString() === userId.toString());
-
-const hasUserDisliked = (comment, userId) =>
-  comment.dislikes.some(u => u.toString() === userId.toString());
-
-module.exports = { canUserEditOrDelete, hasUserLiked, hasUserDisliked };

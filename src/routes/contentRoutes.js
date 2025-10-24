@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const contentController = require("../controllers/contentController");
+const authMiddleware = require("../middleware/authMiddleware");
 
 const uploadDir = path.join(__dirname, "../uploads");
 const storage = multer.diskStorage({
@@ -20,5 +21,7 @@ router.get("/", contentController.getAllContent);
 router.get("/:id", contentController.getContentById);
 router.put("/:id", upload.single("image"), contentController.updateContent);
 router.delete("/:id", contentController.deleteContent);
+router.put("/:id/like", authMiddleware.protect, contentController.likeContent);
+router.put("/:id/dislike", authMiddleware.protect, contentController.dislikeContent);
 
 module.exports = router;
